@@ -32,6 +32,7 @@
 #include <linux/version.h>
 #include <linux/dma-mapping.h>
 #include <linux/dma-buf.h>
+#include <linux/iommu.h>
 #include <linux/shrinker.h>
 #include <linux/cache.h>
 #include <linux/memory_group_manager.h>
@@ -1492,6 +1493,20 @@ static struct kbase_va_region *kbase_mem_from_umm(struct kbase_context *kctx, in
 		 * handling our calls.
 		 */
 		*flags |= BASE_MEM_CACHED_CPU;
+	}
+
+	/*
+	 * Sky1: Without IOMMU/SMMU, GPU L2 cached writes to imported
+	 * DMA-BUFs are invisible to non-snooping DMA masters (e.g. DPU).
+	 * Force non-cacheable GPU access so writes go directly to DRAM.
+	 * Same fix as Panthor's mair_to_memattr NC fallback.
+	 */
+	if (!device_iommu_mapped(kctx->kbdev->dev)) {
+		*flags |= BASE_MEM_UNCACHED_GPU;
+		*flags &= ~BASE_MEM_CACHED_CPU;
+		dev_dbg(kctx->kbdev->dev,
+			"sky1: DMA-BUF import NC for no-IOMMU, flags=0x%llx size=%zu\n",
+			(unsigned long long)*flags, dma_buf->size);
 	}
 
 	if (*flags & BASE_MEM_IMPORT_SHARED)
