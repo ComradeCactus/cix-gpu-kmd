@@ -28,14 +28,16 @@
 #include <linux/devfreq.h>
 #if IS_ENABLED(CONFIG_DEVFREQ_THERMAL)
 #include <linux/devfreq_cooling.h>
+#include <linux/energy_model.h>
 #endif
 #include <linux/pm_domain.h>
 
 #include <linux/version.h>
 #include <linux/pm_opp.h>
 #include <linux/pm_domain.h>
-#if IS_ENABLED(CONFIG_CIX_SCMI_ENERGY_MODEL)
-#include <linux/cix/cix_scmi_em.h>
+#if IS_ENABLED(CONFIG_ARM_SCMI_PERF_DOMAIN) && IS_ENABLED(CONFIG_DEVFREQ_THERMAL)
+#include <linux/scmi_perf_domain.h>
+#include <linux/units.h>
 #endif
 #include <backend/gpu/mali_kbase_clk_rate_trace_mgr.h>
 #include "mali_kbase_devfreq.h"
@@ -675,6 +677,29 @@ static void kbase_devfreq_work_term(struct kbase_device *kbdev)
 	destroy_workqueue(workq);
 }
 
+#if IS_ENABLED(CONFIG_ARM_SCMI_PERF_DOMAIN) && IS_ENABLED(CONFIG_DEVFREQ_THERMAL)
+static int kbase_em_active_power(struct device *dev, unsigned long *power,
+				 unsigned long *kHz)
+{
+	struct kbase_device *kbdev = dev_get_drvdata(dev);
+	unsigned long Hz = *kHz * 1000;
+	int ret;
+
+	if (!kbdev || !kbdev->sky1_perf_dev)
+		return -ENODEV;
+
+	ret = scmi_perf_domain_est_power(kbdev->sky1_perf_dev, &Hz, power);
+	if (ret)
+		return ret;
+
+	if (scmi_perf_domain_power_scale(kbdev->sky1_perf_dev) == SCMI_POWER_MILLIWATTS)
+		*power *= MICROWATT_PER_MILLIWATT;
+
+	*kHz = Hz / 1000;
+	return 0;
+}
+#endif
+
 int kbase_devfreq_init(struct kbase_device *kbdev)
 {
 	struct devfreq_dev_profile *dp;
@@ -723,11 +748,8 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 #if IS_ENABLED(CONFIG_DEVFREQ_THERMAL)
 	err = kbase_ipa_init(kbdev);
 	if (err) {
-		dev_warn(kbdev->dev,
-			 "IPA initialization failed (%d), devfreq will run without thermal cooling",
-			 err);
-		kbdev->ipa_init_failed = true;
-		err = 0;
+		dev_err(kbdev->dev, "IPA initialization failed (%d)", err);
+		goto ipa_init_failed;
 	}
 #endif
 
@@ -773,43 +795,42 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 	}
 
 #if IS_ENABLED(CONFIG_DEVFREQ_THERMAL)
-	if (!kbdev->ipa_init_failed) {
-		/* Register devfreq cooling device with Energy Model (EM).
-		 * of_devfreq_cooling_register_power() will register
-		 * ipa power model ops only after it is an EM device.
-		 */
-#if IS_ENABLED(CONFIG_CIX_SCMI_ENERGY_MODEL)
-		err = cix_scmi_register_em(kbdev->dev);
-		if (err) {
-			dev_err(kbdev->dev, "Failed to register Energy Model (%d)", err);
-			goto cooling_reg_failed;
-		}
-#endif /* CONFIG_CIX_SCMI_ENERGY_MODEL */
+	/* Register devfreq cooling device with Energy Model (EM).
+	 * of_devfreq_cooling_register_power() will register
+	 * ipa power model ops only after it is an EM device.
+	 */
+#if IS_ENABLED(CONFIG_ARM_SCMI_PERF_DOMAIN)
+	{
+		struct em_data_callback em_cb = EM_DATA_CB(kbase_em_active_power);
+		enum scmi_power_scale ps = scmi_perf_domain_power_scale(kbdev->sky1_perf_dev);
+		bool microwatts = (ps == SCMI_POWER_MILLIWATTS || ps == SCMI_POWER_MICROWATTS);
+		int nr = dev_pm_opp_get_opp_count(kbdev->dev);
 
-		kbdev->devfreq_cooling = of_devfreq_cooling_register_power(
-			kbdev->dev->of_node, kbdev->devfreq, &kbase_ipa_power_model_ops);
-		if (IS_ERR_OR_NULL(kbdev->devfreq_cooling)) {
-			err = PTR_ERR_OR_ZERO(kbdev->devfreq_cooling);
-			dev_err(kbdev->dev, "Failed to register cooling device (%d)", err);
-			err = err == 0 ? -ENODEV : err;
-			goto cooling_reg_failed;
+		if (nr > 0) {
+			err = em_dev_register_perf_domain(kbdev->dev, nr, &em_cb, NULL, microwatts);
+			if (err)
+				dev_info(kbdev->dev, "EM registration failed (%d)\n", err);
 		}
+	}
+#endif
+
+	kbdev->devfreq_cooling = of_devfreq_cooling_register_power(
+		kbdev->dev->of_node, kbdev->devfreq, &kbase_ipa_power_model_ops);
+	if (IS_ERR_OR_NULL(kbdev->devfreq_cooling)) {
+		dev_warn(kbdev->dev,
+			 "Failed to register cooling device (%ld), devfreq runs without thermal throttling\n",
+			 PTR_ERR_OR_ZERO(kbdev->devfreq_cooling));
+		kbdev->devfreq_cooling = NULL;
 	}
 #endif /* CONFIG_DEVFREQ_THERMAL */
 
 	return 0;
 
-#if IS_ENABLED(CONFIG_DEVFREQ_THERMAL)
-cooling_reg_failed:
-#if IS_ENABLED(CONFIG_CIX_SCMI_ENERGY_MODEL)
+opp_notifier_failed:
+#ifdef CONFIG_ENERGY_MODEL
 	if (kbdev->dev->em_pd)
 		em_dev_unregister_perf_domain(kbdev->dev);
-#endif /* CONFIG_CIX_SCMI_ENERGY_MODEL */
-
-	devfreq_unregister_opp_notifier(kbdev->dev, kbdev->devfreq);
-#endif /* CONFIG_DEVFREQ_THERMAL */
-
-opp_notifier_failed:
+#endif
 	kbase_devfreq_work_term(kbdev);
 
 devfreq_work_init_failed:
@@ -823,8 +844,8 @@ devfreq_add_dev_failed:
 
 init_core_mask_table_failed:
 #if IS_ENABLED(CONFIG_DEVFREQ_THERMAL)
-	if (!kbdev->ipa_init_failed)
-		kbase_ipa_term(kbdev);
+	kbase_ipa_term(kbdev);
+ipa_init_failed:
 #endif
 	if (free_devfreq_freq_table)
 		kbase_devfreq_term_freq_table(kbdev);
@@ -841,6 +862,10 @@ void kbase_devfreq_term(struct kbase_device *kbdev)
 #if IS_ENABLED(CONFIG_DEVFREQ_THERMAL)
 	if (kbdev->devfreq_cooling)
 		devfreq_cooling_unregister(kbdev->devfreq_cooling);
+#ifdef CONFIG_ENERGY_MODEL
+	if (kbdev->dev->em_pd)
+		em_dev_unregister_perf_domain(kbdev->dev);
+#endif
 #endif
 
 	devfreq_unregister_opp_notifier(kbdev->dev, kbdev->devfreq);
@@ -861,7 +886,6 @@ void kbase_devfreq_term(struct kbase_device *kbdev)
 	kbase_devfreq_term_core_mask_table(kbdev);
 
 #if IS_ENABLED(CONFIG_DEVFREQ_THERMAL)
-	if (!kbdev->ipa_init_failed)
-		kbase_ipa_term(kbdev);
+	kbase_ipa_term(kbdev);
 #endif
 }
