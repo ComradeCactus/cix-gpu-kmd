@@ -1208,7 +1208,6 @@ struct kbase_device {
 
 #if IS_ENABLED(CONFIG_DEVFREQ_THERMAL)
 	struct thermal_cooling_device *devfreq_cooling;
-	bool ipa_init_failed;
 	bool ipa_protection_mode_switched;
 	struct {
 		/* Access to this struct must be with ipa.lock held */

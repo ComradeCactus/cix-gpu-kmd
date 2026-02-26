@@ -577,5 +577,6 @@ static struct platform_driver
 module_platform_driver(protected_memory_allocator_driver);
 
 MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("ARM protected memory allocator");
 MODULE_AUTHOR("ARM Ltd.");
 MODULE_VERSION("1.0");

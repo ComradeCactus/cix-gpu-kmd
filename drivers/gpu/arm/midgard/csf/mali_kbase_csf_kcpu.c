@@ -1779,6 +1779,19 @@ static int kbasep_kcpu_fence_signal_process(struct kbase_kcpu_command_queue *kcp
 	if (WARN_ON(!fence_info->fence))
 		return -EINVAL;
 
+	/* Flush GPU L2 and LSC caches before signaling the fence.
+	 * On TBDR GPUs (Mali G720), tile writeback from internal SRAM to
+	 * external memory goes through L2.  The CSF firmware signals the
+	 * CQS object when the GPU workload completes, but dirty L2 lines
+	 * from tile writeback may not yet be visible to other bus masters
+	 * (e.g. the display controller).  A cache clean+invalidate here
+	 * ensures all rendered data is in external memory before any
+	 * fence waiter (DPU, CPU) accesses the buffer.
+	 */
+	kbase_gpu_start_cache_clean(kctx->kbdev,
+				    GPU_COMMAND_CACHE_CLN_INV_L2_LSC);
+	kbase_gpu_wait_cache_clean(kctx->kbdev);
+
 	ret = dma_fence_signal(fence_info->fence);
 
 	if (unlikely(ret < 0)) {

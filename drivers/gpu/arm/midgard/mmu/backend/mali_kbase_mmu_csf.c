@@ -31,6 +31,11 @@
 #include <mmu/mali_kbase_mmu_internal.h>
 #include <mmu/mali_kbase_mmu_faults_decoder.h>
 
+static bool force_nc_memattr = false;
+module_param(force_nc_memattr, bool, 0644);
+MODULE_PARM_DESC(force_nc_memattr,
+	"Force non-cacheable GPU memory attributes when no IOMMU (default: on)");
+
 void kbase_mmu_get_as_setup(struct kbase_mmu_table *mmut, struct kbase_mmu_setup *const setup)
 {
 	/* Set up the required caching policies at the correct indices
@@ -45,6 +50,36 @@ void kbase_mmu_get_as_setup(struct kbase_mmu_table *mmut, struct kbase_mmu_setup
 		(KBASE_MEMATTR_AARCH64_OUTER_WA << (KBASE_MEMATTR_INDEX_OUTER_WA * 8)) |
 		(KBASE_MEMATTR_AARCH64_NON_CACHEABLE << (KBASE_MEMATTR_INDEX_NON_CACHEABLE * 8)) |
 		(KBASE_MEMATTR_AARCH64_SHARED << (KBASE_MEMATTR_INDEX_SHARED * 8));
+
+	/* When GPU has no IOMMU, force all write-back MEMATTR slots to NC.
+	 * Non-snooping bus masters (like the DPU) cannot see GPU L2 cached
+	 * writes. Equivalent to Panthor's mair_to_memattr() NC override for
+	 * !has_iommu && mode != ACE.
+	 *
+	 * Only apply to user contexts (kctx != NULL), not firmware AS.
+	 * Preserve SHARED (index 6) — used for MCU-host communication
+	 * which has its own coherency handling.
+	 */
+	if (force_nc_memattr && mmut->kctx &&
+	    !device_iommu_mapped(mmut->kctx->kbdev->dev)) {
+		dev_info_once(mmut->kctx->kbdev->dev,
+			"sky1: forcing NC MEMATTR for all user AS (no IOMMU)\n");
+		setup->memattr =
+			(KBASE_MEMATTR_AARCH64_NON_CACHEABLE
+			 << (KBASE_MEMATTR_INDEX_IMPL_DEF_CACHE_POLICY * 8)) |
+			(KBASE_MEMATTR_AARCH64_NON_CACHEABLE
+			 << (KBASE_MEMATTR_INDEX_FORCE_TO_CACHE_ALL * 8)) |
+			(KBASE_MEMATTR_AARCH64_NON_CACHEABLE
+			 << (KBASE_MEMATTR_INDEX_WRITE_ALLOC * 8)) |
+			(KBASE_MEMATTR_AARCH64_NON_CACHEABLE
+			 << (KBASE_MEMATTR_INDEX_OUTER_IMPL_DEF * 8)) |
+			(KBASE_MEMATTR_AARCH64_NON_CACHEABLE
+			 << (KBASE_MEMATTR_INDEX_OUTER_WA * 8)) |
+			(KBASE_MEMATTR_AARCH64_NON_CACHEABLE
+			 << (KBASE_MEMATTR_INDEX_NON_CACHEABLE * 8)) |
+			(KBASE_MEMATTR_AARCH64_SHARED
+			 << (KBASE_MEMATTR_INDEX_SHARED * 8));
+	}
 
 	setup->transtab = (u64)mmut->pgd & AS_TRANSTAB_BASE_MASK;
 	setup->transcfg = AS_TRANSCFG_MODE_SET(0ULL, AS_TRANSCFG_MODE_AARCH64_4K);

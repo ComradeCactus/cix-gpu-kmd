@@ -496,5 +496,6 @@ static struct platform_driver
 module_platform_driver(memory_group_manager_driver);
 
 MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("ARM memory group manager");
 MODULE_AUTHOR("ARM Ltd.");
 MODULE_VERSION("1.0");

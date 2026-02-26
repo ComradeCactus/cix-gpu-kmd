@@ -150,6 +150,21 @@ static int poll_temperature(void *data)
 	while (!kthread_should_stop()) {
 		struct thermal_zone_device *tz = READ_ONCE(model_data->gpu_tz);
 
+		if (!tz && strnlen(model_data->tz_name, sizeof(model_data->tz_name))) {
+			/* Thermal zone not yet available at init time — retry.
+			 * This handles probe ordering where the SCMI sensor
+			 * driver registers thermal zones after the GPU.
+			 */
+			tz = thermal_zone_get_zone_by_name(model_data->tz_name);
+			if (!IS_ERR_OR_NULL(tz)) {
+				pr_info("mali IPA: thermal zone '%s' now available\n",
+					model_data->tz_name);
+				WRITE_ONCE(model_data->gpu_tz, tz);
+			} else {
+				tz = NULL;
+			}
+		}
+
 		if (tz) {
 			int ret;
 
@@ -318,10 +333,16 @@ static int kbase_simple_power_model_recalculate(struct kbase_ipa_model *model)
 		mutex_lock(&model->kbdev->ipa.lock);
 
 		if (IS_ERR_OR_NULL(tz)) {
-			pr_warn_ratelimited(
-				"Error %d getting thermal zone \'%s\', not yet ready?\n",
-				PTR_ERR_OR_ZERO(tz), tz_name);
-			return -EPROBE_DEFER;
+			/* Thermal zone not available yet — likely a probe
+			 * ordering issue (e.g. SCMI sensor driver hasn't
+			 * registered it yet).  Continue with gpu_tz = NULL;
+			 * the polling thread will retry the lookup.
+			 */
+			dev_info(model->kbdev->dev,
+				 "Thermal zone '%s' not yet available, IPA will use fallback temperature until ready\n",
+				 tz_name);
+			model_data->gpu_tz = NULL;
+			return 0;
 		}
 
 		/* Check if another thread raced against us & updated the

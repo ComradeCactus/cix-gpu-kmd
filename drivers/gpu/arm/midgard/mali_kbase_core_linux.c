@@ -3752,7 +3752,7 @@ static struct dentry *init_debugfs(struct kbase_device *kbdev)
 
 #ifdef CONFIG_MALI_DEVFREQ
 #if IS_ENABLED(CONFIG_DEVFREQ_THERMAL)
-	if (kbdev->devfreq && !kbdev->ipa_init_failed)
+	if (kbdev->devfreq)
 		kbase_ipa_debugfs_init(kbdev);
 #endif /* CONFIG_DEVFREQ_THERMAL */
 #endif /* CONFIG_MALI_DEVFREQ */
@@ -4433,7 +4433,7 @@ static ssize_t enable_sky1_power_model_store(struct device *dev, struct device_a
 	if (kstrtouint(buf, 10, &val) != 0)
 		return -EINVAL;
 
-	if (val == 1 && !enable_sky1_power_model && !kbdev->ipa_init_failed) {
+	if (val == 1 && !enable_sky1_power_model && kbdev->devfreq) {
 		enable_sky1_power_model = true;
 		hrtimer_start(&kbdev->sky1_power_timer,
 				HR_TIMER_DELAY_MSEC(PM_POWER_MODEL_SAMPLE_INTERVAL_MS), HRTIMER_MODE_REL);
@@ -4890,6 +4890,7 @@ module_init(kbase_driver_init);
 module_exit(kbase_driver_exit);
 #endif
 MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("ARM Mali Midgard GPU Kernel Driver");
 MODULE_VERSION(MALI_RELEASE_NAME " (UK version " __stringify(BASE_UK_VERSION_MAJOR) "." __stringify(
 	BASE_UK_VERSION_MINOR) ")");
 MODULE_SOFTDEP("pre: memory_group_manager protected_memory_allocator");

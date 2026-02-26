@@ -804,7 +804,7 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 		struct em_data_callback em_cb = EM_DATA_CB(kbase_em_active_power);
 		enum scmi_power_scale ps = scmi_perf_domain_power_scale(kbdev->sky1_perf_dev);
 		bool microwatts = (ps == SCMI_POWER_MILLIWATTS || ps == SCMI_POWER_MICROWATTS);
-		int nr = dev_pm_opp_get_opp_count(kbdev->dev);
+		int nr = dev_pm_opp_get_opp_count(kbdev->sky1_perf_dev);
 
 		if (nr > 0) {
 			err = em_dev_register_perf_domain(kbdev->dev, nr, &em_cb, NULL, microwatts);

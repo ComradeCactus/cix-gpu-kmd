@@ -258,7 +258,7 @@ static void sky1_power_model_work_handler(struct work_struct *work)
 	u32 power;
 	u32 static_power = get_sky1_static_power(kbdev);
 
-	if (kbdev->ipa_init_failed)
+	if (!kbdev->ipa.configured_model)
 		return;
 
 	mutex_lock(&kbdev->ipa.lock);
@@ -283,7 +283,7 @@ static int kbase_platform_sky1_late_init(struct kbase_device *kbdev)
 	kbase_hrtimer_setup(&kbdev->sky1_power_timer, sky1_power_timer_callback,
 			    CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 
-	if(enable_sky1_power_model && !kbdev->ipa_init_failed) {
+	if (enable_sky1_power_model && kbdev->devfreq) {
 		hrtimer_start(&kbdev->sky1_power_timer,
 			HR_TIMER_DELAY_MSEC(PM_POWER_MODEL_SAMPLE_INTERVAL_MS), HRTIMER_MODE_REL);
 	}
