@@ -772,7 +772,7 @@ void kbase_mem_migrate_init(struct kbase_device *kbdev)
 			static_branch_inc(&page_migration_static_key);
 	}
 
-#if (KERNEL_VERSION(6, 17, 0) <= LINUX_VERSION_CODE)
+#if (KERNEL_VERSION(6, 17, 0) <= LINUX_VERSION_CODE) && KBASE_PAGE_MIGRATION_SUPPORTED
 	/* Register movable_operations with the kernel's PGTY_mali_gpu page type.
 	 * This requires our kernel patch that adds PGTY_mali_gpu to page-flags.h
 	 * and the matching case in mm/migrate.c:set_movable_ops().
@@ -786,6 +786,13 @@ void kbase_mem_migrate_init(struct kbase_device *kbdev)
 				 err);
 			static_branch_dec(&page_migration_static_key);
 		}
+	}
+#elif (KERNEL_VERSION(6, 17, 0) <= LINUX_VERSION_CODE)
+	/* Kernel lacks PGTY_mali_gpu patch — disable page migration */
+	if (kbase_is_page_migration_enabled()) {
+		dev_info(kbdev->dev,
+			 "Kernel lacks Mali GPU page type support, disabling page migration.");
+		static_branch_dec(&page_migration_static_key);
 	}
 #endif
 
@@ -801,7 +808,7 @@ void kbase_mem_migrate_term(struct kbase_device *kbdev)
 {
 	struct kbase_mem_migrate *mem_migrate = &kbdev->mem_migrate;
 
-#if (KERNEL_VERSION(6, 17, 0) <= LINUX_VERSION_CODE)
+#if (KERNEL_VERSION(6, 17, 0) <= LINUX_VERSION_CODE) && KBASE_PAGE_MIGRATION_SUPPORTED
 	if (kbase_is_page_migration_enabled())
 		set_movable_ops(NULL, PGTY_mali_gpu);
 #endif

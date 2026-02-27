@@ -46,6 +46,7 @@ int kbase_platform_dvfs_event(struct kbase_device *kbdev, u32 utilisation)
 }
 #endif /* CONFIG_MALI_MIDGARD_DVFS */
 
+#if IS_ENABLED(CONFIG_ARCH_CIX)
 static unsigned int get_rcsu_reg_offset(enum gpu_rcsu_hwreg rcsu_reg)
 {
 	switch (rcsu_reg) {
@@ -76,6 +77,7 @@ void sky1_rcsu_reg_write32(struct kbase_device *kbdev,
 
 	mali_writel(value, kbdev->rcsu_reg + offset);
 }
+#endif
 
 #ifdef CONFIG_MALI_DEVFREQ
 
@@ -179,7 +181,9 @@ static int sky1_gpu_detach_pd(struct kbase_device *kbdev)
 static int kbase_platform_sky1_init(struct kbase_device *kbdev)
 {
 	int err = 0;
+#if IS_ENABLED(CONFIG_ARCH_CIX)
 	u32 harvesting_reg_val;
+#endif
 
 	err = sky1_gpu_attach_pd(kbdev);
 
@@ -329,7 +333,11 @@ static void sky1_gpu_set_devfreq_table(struct kbase_device *kbdev, int opp_index
 	u64 max_available_core_mask;
 	unsigned int max_available_core_count = 0;
 
+#if IS_ENABLED(CONFIG_ARCH_CIX)
 	max_available_core_mask = kbdev->gpu_props.shader_present & kbdev->harvesting_core_mask;
+#else
+	max_available_core_mask = kbdev->gpu_props.shader_present;
+#endif
 	max_available_core_count = __arch_hweight32(max_available_core_mask);
 
 	/* After converting the frequency to MHz, if the unit digit is 0,
