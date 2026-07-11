@@ -42,6 +42,13 @@
 #include "mali_kbase_csf_mcu_shared_reg.h"
 #include <linux/version_compat_defs.h>
 #include <mali_kbase_io.h>
+#include <linux/version.h>
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+#define MALI_CSF_SHMEM_NORESERVE  mk_vma_flags(VMA_NORESERVE_BIT)
+#else
+#define MALI_CSF_SHMEM_NORESERVE  VM_NORESERVE
+#endif
 
 #define CS_REQ_EXCEPTION_MASK (CS_REQ_FAULT_MASK | CS_REQ_FATAL_MASK)
 #define CS_ACK_EXCEPTION_MASK (CS_ACK_FAULT_MASK | CS_ACK_FATAL_MASK)
@@ -3880,7 +3887,7 @@ int kbase_csf_doorbell_mapping_init(struct kbase_device *kbdev)
 	struct file *filp;
 	int ret;
 
-	filp = shmem_file_setup("mali csf db", MAX_LFS_FILESIZE, VM_NORESERVE);
+	filp = shmem_file_setup("mali csf db", MAX_LFS_FILESIZE, MALI_CSF_SHMEM_NORESERVE);
 	if (IS_ERR(filp))
 		return PTR_ERR(filp);
 
@@ -3945,7 +3952,7 @@ int kbase_csf_setup_dummy_user_reg_page(struct kbase_device *kbdev)
 
 	kbdev->csf.user_reg.filp = NULL;
 
-	filp = shmem_file_setup("mali csf user_reg", MAX_LFS_FILESIZE, VM_NORESERVE);
+	filp = shmem_file_setup("mali csf user_reg", MAX_LFS_FILESIZE, MALI_CSF_SHMEM_NORESERVE);
 	if (IS_ERR(filp)) {
 		dev_err(kbdev->dev, "failed to get an unlinked file for user_reg");
 		return PTR_ERR(filp);

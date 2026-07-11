@@ -31,6 +31,14 @@
 #include "mali_kbase_csf_util.h"
 #include <linux/export.h>
 #include <linux/version_compat_defs.h>
+#include <linux/version.h>
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+/* dma_fence_signal() returns void as of 7.0 */
+#define MALI_DMA_FENCE_SIGNAL(f)   ({ dma_fence_signal(f); 0; })
+#else
+#define MALI_DMA_FENCE_SIGNAL(f)   dma_fence_signal(f)
+#endif
 
 #if IS_ENABLED(CONFIG_SYNC_FILE)
 #include "mali_kbase_fence.h"
@@ -1641,7 +1649,7 @@ static int kbase_kcpu_fence_force_signal_process(struct kbase_kcpu_command_queue
 	if (WARN_ON(!fence_info->fence))
 		return -EINVAL;
 
-	ret = dma_fence_signal(fence_info->fence);
+	ret = MALI_DMA_FENCE_SIGNAL(fence_info->fence);
 	if (unlikely(ret < 0)) {
 		dev_warn(kctx->kbdev->dev, "dma_fence(%d) has been signalled already\n", ret);
 		/* Treated as a success */
@@ -1792,7 +1800,7 @@ static int kbasep_kcpu_fence_signal_process(struct kbase_kcpu_command_queue *kcp
 				    GPU_COMMAND_CACHE_CLN_INV_L2_LSC);
 	kbase_gpu_wait_cache_clean(kctx->kbdev);
 
-	ret = dma_fence_signal(fence_info->fence);
+	ret = MALI_DMA_FENCE_SIGNAL(fence_info->fence);
 
 	if (unlikely(ret < 0)) {
 		dev_warn(kctx->kbdev->dev, "dma_fence(%d) has been signalled already\n", ret);
